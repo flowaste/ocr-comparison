@@ -1,0 +1,20 @@
+# FiftyOne for visualization
+fiftyone>=1.0.0
+
+# OCR Engines
+pytesseract>=0.3.10
+easyocr>=1.7.0
+
+# Image processing
+opencv-python>=4.8.0
+Pillow>=10.0.0
+
+# Data processing
+pandas>=2.0.0
+numpy>=1.24.0
+
+# Text similarity
+rapidfuzz>=3.0.0
+
+# Progress bar
+tqdm>=4.65.0
