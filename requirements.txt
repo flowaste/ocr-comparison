@@ -1,9 +1,18 @@
 # FiftyOne for visualization
 fiftyone>=1.0.0
 
-# OCR Engines
+# OCR Engines - Local
 pytesseract>=0.3.10
 easyocr>=1.7.0
+
+# Transformer-based OCR (optional - for trocr, donut)
+# transformers>=4.30.0
+
+# Roboflow DocTR API (optional - for doctr)
+# inference-sdk>=0.9.0
+
+# Google Gemini (optional - for gemini)
+# google-generativeai>=0.3.0
 
 # Image processing
 opencv-python>=4.8.0

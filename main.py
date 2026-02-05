@@ -1,8 +1,15 @@
 """
 Box Label OCR Comparison - FiftyOne App
 
-A FiftyOne application for comparing OCR engines (Tesseract, EasyOCR)
-on box label images with ground truth validation.
+A FiftyOne application for comparing OCR engines on box label images.
+
+Supported engines:
+- tesseract (local, open source)
+- easyocr (local, neural network)
+- trocr (local, transformer-based)
+- donut (local, document understanding transformer)
+- gemini (cloud, requires GOOGLE_API_KEY)
+- doctr (cloud, Roboflow DocTR, requires ROBOFLOW_API_KEY)
 
 Quick start:
     git clone <repo-url>
@@ -54,26 +61,38 @@ def check_dependencies():
         print("  Or: apt-get install tesseract-ocr (Ubuntu)")
 
 
-def setup_dataset():
+def setup_dataset(engines=None, force_rerun=False):
     """Set up the FiftyOne dataset with images and run OCR."""
     import fiftyone as fo
     from ocr_engine import run_ocr_on_dataset
+
+    if engines is None:
+        engines = ['tesseract', 'easyocr']
 
     dataset_name = "box_label_ocr"
     images_dir = PROJECT_ROOT / "data" / "images"
     labels_dir = PROJECT_ROOT / "labels" / "csv"
 
-    # Check if dataset already exists with OCR results
+    # Check if dataset already exists
     if fo.dataset_exists(dataset_name):
         dataset = fo.load_dataset(dataset_name)
-        # Check if OCR has been run
-        if dataset.first() and dataset.first().get_field("easyocr_text"):
-            print(f"Dataset '{dataset_name}' already exists with {len(dataset)} samples")
+
+        if force_rerun:
+            print("Re-running OCR on existing dataset...")
+            run_ocr_on_dataset(dataset, labels_dir, engines=engines)
             return dataset
+
+        # Check if OCR has been run for the requested engines
+        first_sample = dataset.first()
+        missing_engines = [e for e in engines if not first_sample.get_field(f"{e}_text")]
+
+        if missing_engines:
+            print(f"Running OCR for new engines: {missing_engines}")
+            run_ocr_on_dataset(dataset, labels_dir, engines=missing_engines)
         else:
-            print("Dataset exists but OCR not run. Running OCR...")
-            run_ocr_on_dataset(dataset, labels_dir)
-            return dataset
+            print(f"Dataset '{dataset_name}' already has results for {engines}")
+
+        return dataset
 
     print("Creating new dataset...")
 
@@ -104,7 +123,7 @@ def setup_dataset():
 
     # Run OCR on all images
     print("Running OCR on all images...")
-    run_ocr_on_dataset(dataset, labels_dir)
+    run_ocr_on_dataset(dataset, labels_dir, engines=engines)
 
     return dataset
 
@@ -121,18 +140,88 @@ def launch_app(dataset, port=5151):
     session.wait()
 
 
+def print_summary(dataset, engines):
+    """Print summary statistics for each engine."""
+    print(f"\nDataset: {dataset.name}")
+    print(f"Samples: {len(dataset)}")
+    print("\nOCR Results Summary:")
+    print("-" * 40)
+
+    for engine in engines:
+        sim_field = f"{engine}_similarity"
+        sims = [getattr(s, sim_field) for s in dataset if getattr(s, sim_field, None)]
+        if sims:
+            avg = sum(sims) / len(sims)
+            print(f"  {engine:12} avg similarity: {avg:.1f}%")
+
+
 def main():
     """Main entry point."""
     import argparse
+    from ocr_engine import list_engines, get_available_engines
+    from fiftyone_ocr_models import list_fiftyone_models, FIFTYONE_OCR_MODELS
 
-    parser = argparse.ArgumentParser(description="Box Label OCR Comparison")
+    all_engines = list_engines()
+    all_fo_models = list_fiftyone_models()
+
+    parser = argparse.ArgumentParser(
+        description="Box Label OCR Comparison",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=f"""
+Available OCR engines (direct):
+  Local (free):
+    - tesseract    Traditional OCR engine
+    - easyocr      Neural network OCR
+    - trocr        Transformer-based OCR (requires transformers)
+    - donut        Document Understanding Transformer (requires transformers)
+
+  Cloud APIs (requires API keys):
+    - gemini       Google Gemini (set GOOGLE_API_KEY)
+    - doctr        Roboflow DocTR OCR (set ROBOFLOW_API_KEY)
+
+FiftyOne Plugin Models (--fo-models):
+    - kosmos2_5    Microsoft Kosmos-2.5 (document OCR)
+    - olmocr2      Allen AI olmOCR-2 (markdown output)
+    - florence2    Microsoft Florence-2 (vision foundation)
+    - qwen2_vl     Qwen2.5-VL (multimodal VLM)
+    - minicpm_v    MiniCPM-V 4.5 (efficient VLM)
+    - moondream    Moondream 3 (lightweight VLM)
+
+Examples:
+  python main.py                                    # tesseract + easyocr
+  python main.py -e tesseract easyocr gemini        # Add cloud API
+  python main.py --fo-models kosmos2_5 florence2    # Use FiftyOne plugins
+  python main.py --list-engines                     # Show all available
+        """
+    )
     parser.add_argument("--port", type=int, default=5151, help="Port for FiftyOne app")
     parser.add_argument("--rerun-ocr", action="store_true", help="Re-run OCR even if results exist")
+    parser.add_argument("--engines", "-e", nargs="+", default=["tesseract", "easyocr"],
+                       help=f"OCR engines to use (default: tesseract easyocr)")
+    parser.add_argument("--fo-models", nargs="+", default=[],
+                       help=f"FiftyOne plugin models to use: {all_fo_models}")
+    parser.add_argument("--list-engines", action="store_true", help="List available OCR engines and exit")
+    parser.add_argument("--no-app", action="store_true", help="Run OCR but don't launch FiftyOne app")
     args = parser.parse_args()
+
+    if args.list_engines:
+        print("\n=== Direct OCR Engines ===")
+        print("All supported:", all_engines)
+        print("Currently available:", get_available_engines())
+        print("\nTo use cloud APIs, set environment variables:")
+        print("  export GOOGLE_API_KEY=your-key      # for gemini")
+        print("  export ROBOFLOW_API_KEY=your-key    # for doctr")
+        print("\n=== FiftyOne Plugin Models ===")
+        for name, info in FIFTYONE_OCR_MODELS.items():
+            print(f"  {name:12} - {info['description']}")
+        return
 
     print("=" * 50)
     print("Box Label OCR Comparison")
     print("=" * 50)
+    print(f"Direct engines: {args.engines}")
+    if args.fo_models:
+        print(f"FiftyOne models: {args.fo_models}")
 
     # Check dependencies
     check_dependencies()
@@ -143,23 +232,21 @@ def main():
     if args.rerun_ocr and fo.dataset_exists("box_label_ocr"):
         fo.delete_dataset("box_label_ocr")
 
-    dataset = setup_dataset()
+    dataset = setup_dataset(engines=args.engines, force_rerun=args.rerun_ocr)
+
+    # Run FiftyOne plugin models if specified
+    if args.fo_models:
+        from fiftyone_ocr_models import run_fiftyone_ocr_comparison
+        labels_dir = PROJECT_ROOT / "labels" / "csv"
+        run_fiftyone_ocr_comparison(dataset, models=args.fo_models, labels_dir=labels_dir)
 
     # Print summary
-    print(f"\nDataset: {dataset.name}")
-    print(f"Samples: {len(dataset)}")
-
-    # Show OCR comparison summary
-    tess_sims = [s.tesseract_similarity for s in dataset if s.tesseract_similarity]
-    easy_sims = [s.easyocr_similarity for s in dataset if s.easyocr_similarity]
-
-    if tess_sims:
-        print(f"\nTesseract avg similarity: {sum(tess_sims)/len(tess_sims):.1f}%")
-    if easy_sims:
-        print(f"EasyOCR avg similarity: {sum(easy_sims)/len(easy_sims):.1f}%")
+    all_models = args.engines + args.fo_models
+    print_summary(dataset, all_models)
 
     # Launch app
-    launch_app(dataset, port=args.port)
+    if not args.no_app:
+        launch_app(dataset, port=args.port)
 
 
 if __name__ == "__main__":
